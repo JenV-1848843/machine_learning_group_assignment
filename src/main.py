@@ -3,7 +3,7 @@
 Module Docstring
 """
 
-__author__ = "Team names comma separated"
+__author__ = "Jens Sanen, Wout Bosteels, Jen Verboven"
 __version__ = "0.1.0"
 __license__ = "GPLv3"
 
