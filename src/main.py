@@ -207,9 +207,12 @@ def main(args):
 
     # Code for plotting predictions vs actual
     with torch.no_grad():
-        predicted = model(X_train.to(device)).to('cpu').numpy()
+        predicted = model(X_test.to(device)).to('cpu').numpy()
 
-    plt.plot(y_train, label = 'Actual Last Close')
+    mape = mean_absolute_percentage_error(y_test, predicted)
+    print("MAPE: {}".format(mape))
+
+    plt.plot(y_test, label = 'Actual Last Close')
     plt.plot(predicted, label = 'Predicted Last Close')
     plt.xlabel('Day')
     plt.ylabel('Close')
@@ -229,12 +232,6 @@ def main(args):
     # x, y = create_sequences(train_values, seq_length)
 
 
-    # TODO --> replace these test arrays with the actual values and predicted values
-    # This is solely to demonstrate how to use the mean_absolute_percentage_error function
-    # y_true = [3, -0.5, 2, 7]
-    # y_pred = [2.5, 0.0, 2, 8]
-    # mape = mean_absolute_percentage_error(y_true, y_pred)
-    # print("MAPE: {}".format(mape))
 
 if __name__ == "__main__":
     """ This is executed when run from the command line """
