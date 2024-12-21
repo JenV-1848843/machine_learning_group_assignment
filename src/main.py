@@ -18,6 +18,7 @@ import torch.nn as nn
 from sklearn.metrics import mean_absolute_percentage_error
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import StandardScaler
 from copy import deepcopy as dc
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
@@ -70,6 +71,11 @@ def normalize(df):
     scaler = MinMaxScaler(feature_range=(-1, 1))
     return scaler.fit_transform(df)
 
+
+def standarize(df):
+    scaler = StandardScaler()
+    return scaler.fit_transform(df)
+
 def plot_data(df):
     plt.figure(figsize=(10, 5))
     plt.plot(df['Date'], df['Last Close'], label="Last Close")
@@ -95,6 +101,67 @@ def create_sequences(data, seq_length):
         y.append(data[i+seq_length])
     return torch.FloatTensor(x), torch.FloatTensor(y)
 
+def train_one_epoch(model, train_loader, optimizer, loss_function, epoch):
+        model.train(True)
+        # print(f'Epoch: {epoch + 1}')
+        running_loss = 0.0
+
+        for batch_index, batch in enumerate(train_loader):
+            X_batch, y_batch = batch[0].to(device), batch[1].to(device)
+
+            output = model(X_batch)
+            loss = loss_function(output, y_batch)
+            running_loss += loss.item()
+            optimizer.zero_grad()
+            loss.backward()
+            # Step in direction of the gradient
+            optimizer.step()
+
+            if batch_index % 100 == 99: #print every 100 batches
+                avg_loss_across_batches = running_loss / 100
+                # print('Batch {0}, Loss: {1:.3f}'.format(batch_index+0, avg_loss_across_batches))
+                running_loss = 0.0
+        # print()
+
+def validate_one_epoch(model, test_loader, loss_function):
+    model.train(False)
+    running_loss = 0.0
+
+    for batch_index, batch in enumerate(test_loader):
+        X_batch, y_batch = batch[0].to(device), batch[1].to(device)
+
+        with torch.no_grad():
+            output = model(X_batch)
+            loss = loss_function(output, y_batch)
+            running_loss += loss.item()
+
+    avg_loss_across_batches = running_loss / len(test_loader)
+
+    # print('Val Loss: {0:.3f}'.format(avg_loss_across_batches))
+    # print('***************************************************')
+    # print()
+
+def train_model(batch_size, num_epochs, learning_rate, hidden_size, num_stacked_layers, train_dataset, test_dataset):
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+    model = LSTM(1, hidden_size, num_stacked_layers)
+    model.to(device)
+
+    loss_function = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+
+    for epoch in range(num_epochs):
+        train_one_epoch(model, train_loader, optimizer, loss_function, epoch)
+        validate_one_epoch(model, test_loader, loss_function)
+
+    with torch.no_grad():
+        predicted = model(test_dataset.X.to(device)).to('cpu').numpy()
+
+    mape = mean_absolute_percentage_error(test_dataset.y, predicted)
+
+    return predicted, mape
+
 
 def main(args):
     """ Main entry point of the app """
@@ -103,10 +170,9 @@ def main(args):
     # HERE GOES YOUR CODE TO CALCULATE THE MAPE
     # FEEL FREE TO IMPLEMENT HELPER FUNCTIONS
 
-
     train_data, test_data = read_files(training_file, testing_file)
 
-    lookback = 7
+    lookback = 20
     # Adds lookback columns to the dataframe (the values of last close from the previous day up until "lookback" days backwards)
     shifted_training_df = prepare_dataframe_for_lstm(train_data, lookback)
     shifted_testing_df = prepare_dataframe_for_lstm(test_data, lookback)
@@ -114,8 +180,8 @@ def main(args):
     shifted_training_df_as_np = shifted_training_df.to_numpy()
     shifted_testing_df_as_np = shifted_testing_df.to_numpy()
 
-    shifted_training_df_as_np = normalize(shifted_training_df_as_np)
-    shifted_testing_df_as_np = normalize(shifted_testing_df_as_np)
+    shifted_training_df_as_np = standarize(shifted_training_df_as_np)
+    shifted_testing_df_as_np = standarize(shifted_testing_df_as_np)
 
     # Take all columns except for the actual last close column as X (so open, high, low, and the lookback values of last close)
     X_train = np.concatenate((shifted_training_df_as_np[:, :3], shifted_training_df_as_np[:, 4:]), axis=1)
@@ -138,86 +204,45 @@ def main(args):
     y_train = torch.tensor(y_train).float()
     y_test = torch.tensor(y_test).float()
 
-    # Make the Pytorch tensors into datasets for use with Pytorch
-    train_dataset = TimeSeriesDataset(X_train, y_train)
-    test_dataset = TimeSeriesDataset(X_test, y_test)
+    train_data = TimeSeriesDataset(X_train, y_train)
+    test_data = TimeSeriesDataset(X_test, y_test)
 
-    # Wrap the datasets in data loaders to make batches
-    batch_size = 16
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-
-    # Helper code for visualization
-    # for _, batch in enumerate(train_loader):
-    #     X_batch, y_batch = batch[0].to(device), batch[1].to(device)
-    #     print(X_batch.shape, y_batch.shape)
-    #     break
-
-    model = LSTM(1, 10, 1)
-    model.to(device)
-
-    learning_rate = 0.001
-    num_epochs = 50
-    loss_function = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-
-    def train_one_epoch():
-        model.train(True)
-        print(f'Epoch: {epoch + 1}')
-        running_loss = 0.0
-
-        for batch_index, batch in enumerate(train_loader):
-            X_batch, y_batch = batch[0].to(device), batch[1].to(device)
-
-            output = model(X_batch)
-            loss = loss_function(output, y_batch)
-            running_loss += loss.item()
-            optimizer.zero_grad()
-            loss.backward()
-            # Step in direction of the gradient
-            optimizer.step()
-
-            if batch_index % 100 == 99: #print every 100 batches
-                avg_loss_across_batches = running_loss / 100
-                print('Batch {0}, Loss: {1:.3f}'.format(batch_index+0, avg_loss_across_batches))
-                running_loss = 0.0
-        print()
-
-    def validate_one_epoch():
-        model.train(False)
-        running_loss = 0.0
-
-        for batch_index, batch in enumerate(test_loader):
-            X_batch, y_batch = batch[0].to(device), batch[1].to(device)
-
-            with torch.no_grad():
-                output = model(X_batch)
-                loss = loss_function(output, y_batch)
-                running_loss += loss.item()
-
-        avg_loss_across_batches = running_loss / len(test_loader)
-
-        print('Val Loss: {0:.3f}'.format(avg_loss_across_batches))
+    # Stel je hebt de mapes-lijst zoals in jouw code
+    mapes = []
+    for i in range(20):
+        learning_rate = 0.001 + 0.01 * i
+        predicted, mape = train_model(
+            batch_size=16, 
+            num_epochs=25, 
+            learning_rate=learning_rate, 
+            hidden_size=10, 
+            num_stacked_layers=3, 
+            train_dataset=train_data,
+            test_dataset=test_data)
+        mapes.append([learning_rate, mape])
+        print(f'Iteration {i+1} done')
+        print(f'Learing rate: {learning_rate}')
+        print(f'MAPE: {mape}')
         print('***************************************************')
-        print()
 
-    for epoch in range(num_epochs):
-        train_one_epoch()
-        validate_one_epoch()
+    # Extract de learning rates en MAPE-waarden
+    learning_rates = [x[0] for x in mapes]
+    mape_values = [x[1] for x in mapes]
 
-    # Code for plotting predictions vs actual
-    with torch.no_grad():
-        predicted = model(X_test.to(device)).to('cpu').numpy()
-
-    mape = mean_absolute_percentage_error(y_test, predicted)
-    print("MAPE: {}".format(mape))
-
-    plt.plot(y_test, label = 'Actual Last Close')
-    plt.plot(predicted, label = 'Predicted Last Close')
-    plt.xlabel('Day')
-    plt.ylabel('Close')
-    plt.legend()
+    # Plot de MAPE-waarden tegen de learning rates
+    plt.plot(learning_rates, mape_values, marker='o')
+    plt.xlabel('Learning Rate')
+    plt.ylabel('MAPE')
+    plt.title('MAPE in functie van de Learning Rate')
+    plt.grid(True)
     plt.show()
+
+    # plt.plot(np.l, label = 'Actual Last Close')
+    # plt.plot(predicted, label = 'Predicted Last Close')
+    # plt.xlabel('Day')
+    # plt.ylabel('Close')
+    # plt.legend()
+    # plt.show()
 
     # plt.plot(train_data['Date'], train_data['Last Close'])
     # plt.show()
