@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (MiKTeX 24.1) (preloaded format=pdflatex 2024.11.26)  21 DEC 2024 20:26
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (MiKTeX 24.1) (preloaded format=pdflatex 2024.11.26)  23 DEC 2024 21:54
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -458,12 +458,14 @@ fg
 File: epstopdf-sys.cfg 2021/03/18 v2.0 Configuration of epstopdf for MiKTeX
 ))
 Package hyperref Info: Link coloring OFF on input line 13.
+ (latex_template.out) (latex_template.out)
 \@outlinefile=\write3
 \openout3 = `latex_template.out'.
 
 LaTeX Font Info:    Trying to load font information for U+msa on input line 41.
 
- (C:\Users\jenve\AppData\Local\Programs\MiKTeX\tex/latex/amsfonts\umsa.fd
+
+(C:\Users\jenve\AppData\Local\Programs\MiKTeX\tex/latex/amsfonts\umsa.fd
 File: umsa.fd 2013/01/14 v3.01 AMS symbols A
 )
 LaTeX Font Info:    Trying to load font information for U+msb on input line 41.
@@ -473,28 +475,6 @@ LaTeX Font Info:    Trying to load font information for U+msb on input line 41.
 File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 )
 LaTeX Font Info:    Calculating math sizes for size <11> on input line 41.
-
-
-Package hyperref Warning: Suppressing link with empty target on input line 70.
-
-
-Package hyperref Warning: Suppressing link with empty target on input line 70.
-
-
-Package hyperref Warning: Suppressing link with empty target on input line 104.
-
-
-
-Package hyperref Warning: Suppressing link with empty target on input line 104.
-
-
-
-Package hyperref Warning: Suppressing link with empty target on input line 104.
-
-
-
-Package hyperref Warning: Suppressing link with empty target on input line 105.
-
 
 [1{C:/Users/jenve/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map}{C:/Users/je
 nve/AppData/Local/Programs/MiKTeX/fonts/enc/dvips/base/8r.enc}
@@ -507,12 +487,9 @@ LaTeX Font Info:    Trying to load font information for OT1+pcr on input line 1
 (C:\Users\jenve\AppData\Local\Programs\MiKTeX\tex/latex/psnfss\ot1pcr.fd
 File: ot1pcr.fd 2001/06/04 font definitions for OT1/pcr.
 )
-
-Package hyperref Warning: Suppressing link with empty target on input line 194.
-
-
 LaTeX Font Info:    Trying to load font information for OMS+ptm on input line 2
 25.
+
 (C:\Users\jenve\AppData\Local\Programs\MiKTeX\tex/latex/psnfss\omsptm.fd
 File: omsptm.fd 
 )
@@ -520,33 +497,34 @@ LaTeX Font Info:    Font shape `OMS/ptm/m/n' in size <10> not available
 (Font)              Font shape `OMS/cmsy/m/n' tried instead on input line 225.
 
 [2]
-Underfull \hbox (badness 4254) in paragraph at lines 282--283
+Underfull \hbox (badness 4254) in paragraph at lines 288--289
 []\OT1/ptm/m/n/8 R. Guthrie, "Se-quence Mod-els and Long Short-Term Mem-ory
  []
 
 
-Underfull \hbox (badness 3803) in paragraph at lines 282--283
+Underfull \hbox (badness 3803) in paragraph at lines 288--289
 \OT1/ptm/m/n/8 Net-works", Py-Torch, April 8, 2017. [On-line]. Avail-able: []$h
 ttps :
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 284--285
+Underfull \hbox (badness 10000) in paragraph at lines 290--291
 []\OT1/ptm/m/n/8 Scikit-learn de-vel-op-ers, "mean ab-so-lute per-cent-age er-r
 or",
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 284--285
+Underfull \hbox (badness 10000) in paragraph at lines 290--291
 \OT1/ptm/m/n/8 Scikit-learn, De-cem-ber 20, 2024. [On-line]. Avail-able:
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 284--285
+Underfull \hbox (badness 10000) in paragraph at lines 290--291
 []$\OT1/ptm/m/n/8 https : / / scikit-[]learn . org / stable / modules / generat
 ed / sklearn . metrics . mean[]
  []
 
+[3]
 
 ** Conference Paper **
 Before submitting the final camera ready copy, remember to:
@@ -558,29 +536,21 @@ Before submitting the final camera ready copy, remember to:
  uses only Type 1 fonts and that every step in the generation
  process uses the appropriate paper size.
 
-[3] (latex_template.aux)
+[4
+
+] (latex_template.aux)
  ***********
 LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2024-01-04>
  ***********
-
-
-LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.
-
-
-Package rerunfilecheck Warning: File `latex_template.out' has changed.
-(rerunfilecheck)                Rerun to get outlines right
-(rerunfilecheck)                or use package `bookmark'.
-
-Package rerunfilecheck Info: Checksums for `latex_template.out':
-(rerunfilecheck)             Before: <no file>
-(rerunfilecheck)             After:  9B54743AF3FD9558FA84590CF3053D76;2204.
+Package rerunfilecheck Info: File `latex_template.out' has not changed.
+(rerunfilecheck)             Checksum: 9B54743AF3FD9558FA84590CF3053D76;2204.
  ) 
 Here is how much of TeX's memory you used:
- 11332 strings out of 474486
- 177811 string characters out of 5743754
- 1950542 words of memory out of 5000000
- 33425 multiletter control sequences out of 15000+600000
+ 11353 strings out of 474486
+ 178278 string characters out of 5743754
+ 1951542 words of memory out of 5000000
+ 33441 multiletter control sequences out of 15000+600000
  609174 words of font info for 137 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  75i,11n,79p,591b,441s stack positions out of 10000i,1000n,20000p,200000b,200000s
@@ -596,9 +566,9 @@ al/Programs/MiKTeX/fonts/type1/urw/times/utmb8a.pfb><C:/Users/jenve/AppData/Loc
 al/Programs/MiKTeX/fonts/type1/urw/times/utmbi8a.pfb><C:/Users/jenve/AppData/Lo
 cal/Programs/MiKTeX/fonts/type1/urw/times/utmr8a.pfb><C:/Users/jenve/AppData/Lo
 cal/Programs/MiKTeX/fonts/type1/urw/times/utmri8a.pfb>
-Output written on latex_template.pdf (3 pages, 153431 bytes).
+Output written on latex_template.pdf (4 pages, 160532 bytes).
 PDF statistics:
- 136 PDF objects out of 1000 (max. 8388607)
- 37 named destinations out of 1000 (max. 500000)
- 1 words of extra memory for PDF output out of 10000 (max. 10000000)
+ 190 PDF objects out of 1000 (max. 8388607)
+ 38 named destinations out of 1000 (max. 500000)
+ 113 words of extra memory for PDF output out of 10000 (max. 10000000)
 

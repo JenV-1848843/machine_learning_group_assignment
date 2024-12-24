@@ -16,14 +16,16 @@ import matplotlib.dates as mdates
 import torch
 import torch.nn as nn
 from sklearn.metrics import mean_absolute_percentage_error
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.preprocessing import StandardScaler
 from copy import deepcopy as dc
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
+from sklearn.model_selection import KFold
 
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+
+OG_FEAT_SIZE = 0
 
 class TimeSeriesDataset(Dataset):
     def __init__(self, X, y):
@@ -162,6 +164,69 @@ def train_model(batch_size, num_epochs, learning_rate, hidden_size, num_stacked_
 
     return predicted, mape
 
+def train_model_kfold(k, model_params, traindata, batch_size = 16, num_epochs = 10):
+    X, y = traindata.X, traindata.y
+    kf = KFold(n_splits=k, shuffle=True, random_state=42)
+
+    fold_mape_scores = []
+    best_mape = float('inf')
+    best_model = None
+
+    for fold, (train_idx, val_idx) in enumerate(kf.split(X)):
+        print(f"Fold {fold + 1}/{k}")
+        
+        X_train, X_val = X[train_idx], X[val_idx]
+        y_train, y_val = y[train_idx], y[val_idx]
+
+        train_dataset = TimeSeriesDataset(X_train, y_train)
+        val_dataset = TimeSeriesDataset(X_val, y_val)
+        # test_dataset = TimeSeriesDataset(testdata)
+
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+
+        model = LSTM(input_size=1, hidden_size=model_params.get("hidden_size"), num_stacked_layers=model_params.get("num_stacked_layers"))
+        model.to(device)
+
+        loss_function = nn.MSELoss()
+        optimizer = torch.optim.Adam(model.parameters(), lr=model_params.get("learning_rate"))
+
+        # Train and validate for each epoch
+        for epoch in range(num_epochs):
+            train_one_epoch(model, train_loader, optimizer, loss_function, epoch)
+
+        # Validate
+        with torch.no_grad():
+            predictions = []
+            ground_truths = []
+            for X_batch, y_batch in val_loader:
+                X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+                output = model(X_batch)
+                predictions.append(output.cpu().numpy())
+                ground_truths.append(y_batch.cpu().numpy())
+
+            # Flatten predictions and ground truths
+            predictions = np.concatenate(predictions)
+            ground_truths = np.concatenate(ground_truths)
+
+            # Calculate MAPE for the current fold
+            fold_mape = mean_absolute_percentage_error(ground_truths, predictions)
+            print(f"Fold {fold + 1} MAPE: {fold_mape}")
+            fold_mape_scores.append(fold_mape)
+
+            # predicted = best_model(test_dataset.X.to(device)).to('cpu').numpy()
+            # mape_best_model = mean_absolute_percentage_error(test_dataset.y, predicted)
+
+            # update best model if MAPE is lower
+            if fold_mape < best_mape:
+                best_mape = fold_mape
+                best_model = dc(model)
+
+    # Calculate the average MAPE across all folds
+    avg_mape = np.mean(fold_mape_scores)
+    print(f"Average MAPE across {k} folds: {avg_mape}")
+
+    return best_model, avg_mape, fold_mape_scores
 
 def main(args):
     """ Main entry point of the app """
@@ -171,25 +236,32 @@ def main(args):
     # FEEL FREE TO IMPLEMENT HELPER FUNCTIONS
 
     train_data, test_data = read_files(training_file, testing_file)
+    # print(train_data) # 5 columns, 1629 rows
+    # print(test_data) # 5 columns, 23 rows
 
-    lookback = 20
-    # Adds lookback columns to the dataframe (the values of last close from the previous day up until "lookback" days backwards)
+    lookback = 7
+    # # Adds lookback columns to the dataframe (the values of last close from the previous day up until "lookback" days backwards)
     shifted_training_df = prepare_dataframe_for_lstm(train_data, lookback)
     shifted_testing_df = prepare_dataframe_for_lstm(test_data, lookback)
+    FEATURE_AMOUNT = shifted_training_df.shape[1] # One less "feature" than og df because date is now the index of the row, no longer a feature
+    columns = shifted_training_df.columns.tolist() # Create a list of column names to be able to split data later on
+    target_feature_index = columns.index("Last Close")
+    # print(shifted_training_df) # (FEATURE_AMOUNT) columns, 1629 - lookback rows
+    # print(shifted_testing_df) # (FEATURE_AMOUNT) columns, 23 - lookback rows
 
-    shifted_training_df_as_np = shifted_training_df.to_numpy()
-    shifted_testing_df_as_np = shifted_testing_df.to_numpy()
+    shifted_training_df_as_np = shifted_training_df.to_numpy() # Turn into numpy 2D array
+    shifted_testing_df_as_np = shifted_testing_df.to_numpy() # Turn into numpy 2D array
 
-    shifted_training_df_as_np = standarize(shifted_training_df_as_np)
-    shifted_testing_df_as_np = standarize(shifted_testing_df_as_np)
+    shifted_training_df_as_np = standarize(shifted_training_df_as_np) # Flatten data
+    shifted_testing_df_as_np = standarize(shifted_testing_df_as_np) # Flatten data
 
     # Take all columns except for the actual last close column as X (so open, high, low, and the lookback values of last close)
-    X_train = np.concatenate((shifted_training_df_as_np[:, :3], shifted_training_df_as_np[:, 4:]), axis=1)
-    X_test = np.concatenate((shifted_testing_df_as_np[:, :3], shifted_testing_df_as_np[:, 4:]), axis=1)
-    # Take the actual last close column as the feature to predict
-    y_train = shifted_training_df_as_np[:, 3]
-    y_test = shifted_testing_df_as_np[:, 3]
-    # flip the training feature dataframe so that the oldest of the lookback values is at the front of the dataframe so the LSTM model can learn the trend going forwards in time
+    X_train = np.delete(shifted_training_df_as_np, target_feature_index, axis=1)
+    X_test = np.delete(shifted_testing_df_as_np, target_feature_index, axis=1)
+    # # Take the actual last close column as the feature to predict
+    y_train= shifted_training_df_as_np[:, target_feature_index]
+    y_test = shifted_testing_df_as_np[:, target_feature_index]
+    # Flip the training feature dataframe so that the oldest of the lookback values is at the front of the dataframe so the LSTM model can learn the trend going forwards in time
     X_train = dc(np.flip(X_train, axis=1))
 
     # Add an extra dimension needed for the Pytorch LSTM model
@@ -208,53 +280,84 @@ def main(args):
     test_data = TimeSeriesDataset(X_test, y_test)
 
     # Stel je hebt de mapes-lijst zoals in jouw code
-    mapes = []
-    for i in range(20):
-        learning_rate = 0.001 + 0.01 * i
-        predicted, mape = train_model(
-            batch_size=16, 
-            num_epochs=25, 
-            learning_rate=learning_rate, 
-            hidden_size=10, 
-            num_stacked_layers=3, 
-            train_dataset=train_data,
-            test_dataset=test_data)
-        mapes.append([learning_rate, mape])
-        print(f'Iteration {i+1} done')
-        print(f'Learing rate: {learning_rate}')
-        print(f'MAPE: {mape}')
-        print('***************************************************')
+    # mapes = []
+    # for i in range(20):
+    #     learning_rate = 0.001 + 0.01 * i
+    #     predicted, mape = train_model(
+    #         batch_size=16,
+    #         num_epochs=25,
+    #         learning_rate=learning_rate,
+    #         hidden_size=10,
+    #         num_stacked_layers=3,
+    #         train_dataset=train_data,
+    #         test_dataset=test_data)
+    #     mapes.append([learning_rate, mape])
+    #     print(f'Iteration {i+1} done')
+    #     print(f'Learing rate: {learning_rate}')
+    #     print(f'MAPE: {mape}')
+    #     print('***************************************************')
+    #
+    # # Extract de learning rates en MAPE-waarden
+    # learning_rates = [x[0] for x in mapes]
+    # mape_values = [x[1] for x in mapes]
+    #
+    # # Plot de MAPE-waarden tegen de learning rates
+    # plt.plot(learning_rates, mape_values, marker='o')
+    # plt.xlabel('Learning Rate')
+    # plt.ylabel('MAPE')
+    # plt.title('MAPE in functie van de Learning Rate')
+    # plt.show()
 
-    # Extract de learning rates en MAPE-waarden
-    learning_rates = [x[0] for x in mapes]
-    mape_values = [x[1] for x in mapes]
+    model_params = {
+        "hidden_size": 10,
+        "num_stacked_layers": 3,
+        "learning_rate": 0.001
+    }
 
-    # Plot de MAPE-waarden tegen de learning rates
-    plt.plot(learning_rates, mape_values, marker='o')
-    plt.xlabel('Learning Rate')
-    plt.ylabel('MAPE')
-    plt.title('MAPE in functie van de Learning Rate')
-    plt.grid(True)
-    plt.show()
+    best_model, avg_mape, fold_mape_scores = train_model_kfold(
+        k=5,
+        model_params=model_params,
+        traindata=train_data,
+        batch_size=16,
+        num_epochs=10
+    )
 
-    # plt.plot(np.l, label = 'Actual Last Close')
-    # plt.plot(predicted, label = 'Predicted Last Close')
+    with torch.no_grad():
+        predicted = best_model(test_data.X.to(device)).to('cpu').numpy()
+
+    mape_best_model = mean_absolute_percentage_error(test_data.y, predicted)
+
+    print(mape_best_model)
+
+    # plt.plot(test_data.y, label='actual close')
+    # plt.plot(predicted, label='predicted close')
     # plt.xlabel('Day')
-    # plt.ylabel('Close')
+    # plt.ylabel('close')
     # plt.legend()
     # plt.show()
 
-    # plt.plot(train_data['Date'], train_data['Last Close'])
-    # plt.show()
-    # train_values = train_data['Last Close'].values.reshape(-1, 1)
-    # test_values = test_data['Last Close'].values.reshape(-1, 1)
 
-    # plot_data(train_data)
 
-    # train_values = normalize(train_values)
 
-    # seq_length = 2
-    # x, y = create_sequences(train_values, seq_length)
+
+    # # plt.plot(np.l, label = 'Actual Last Close')
+    # # plt.plot(predicted, label = 'Predicted Last Close')
+    # # plt.xlabel('Day')
+    # # plt.ylabel('Close')
+    # # plt.legend()
+    # # plt.show()
+    #
+    # # plt.plot(train_data['Date'], train_data['Last Close'])
+    # # plt.show()
+    # # train_values = train_data['Last Close'].values.reshape(-1, 1)
+    # # test_values = test_data['Last Close'].values.reshape(-1, 1)
+    #
+    # # plot_data(train_data)
+    #
+    # # train_values = normalize(train_values)
+    #
+    # # seq_length = 2
+    # # x, y = create_sequences(train_values, seq_length)
 
 
 
