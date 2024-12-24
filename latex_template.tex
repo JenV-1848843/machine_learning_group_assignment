@@ -235,6 +235,12 @@ X_{\text{scaled}} = \frac{X - X_{\text{min}}}{X_{\text{max}} - X_{\text{min}}} \
 
 For our optimizer, we went with Adam after consideration and testing of the following optimizers: Adam, SGD, RMSprop and Adagrad [6]. Adagrad and SGD performed worse than the other two in general, and Adam provided more consistent results than RMSprop.
 
+We added a function for training our model with different learning rates and plotted this against the received MAPE to find out what the optimal learning was for our model.
+
+We also added k-fold cross validation to our model. Before adding it, our model seemed to not get below a MAPE value of 0.4, which made the model 60% accurate at best. On top of that the retrieved MAPE value for the model wasn't consistent (the MAPE was very different eacht time the model was trained with exactly the same parameters).
+
+We needed to add multiple scalers for each individual part of the split datasets to be able to invert the transformation applied to them so we could plot the actual data in the end instead of the normalized data.
+
 \section*{Acknowledgment}
 
 The preferred spelling of the word ``acknowledgment'' in America is without 
