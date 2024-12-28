@@ -39,11 +39,12 @@ class TimeSeriesDataset(Dataset):
         return self.X[item], self.y[item]
 
 class LSTM(nn.Module):
-    def __init__(self, input_size, hidden_size, num_stacked_layers):
+    def __init__(self, input_size, hidden_size, num_stacked_layers, dropout_rate):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_stacked_layers = num_stacked_layers
         self.lstm = nn.LSTM(input_size, hidden_size, num_stacked_layers, batch_first=True)
+        self.dropout = nn.Dropout(dropout_rate)
         # The final layer should be of size one as we're predicting one output value (close stock value)
         self.fc = nn.Linear(hidden_size, 1)
 
@@ -53,8 +54,10 @@ class LSTM(nn.Module):
         c0 = torch.zeros(self.num_stacked_layers, batch_size, self.hidden_size).to(device)
         # _ here is the updated (h0, c0) tuple which we don't care about in this case
         out, _ = self.lstm(x, (h0, c0))
+
+        out = self.dropout(out[:, -1, :])
         # transform the output from the fc layer to the appropriate size
-        out = self.fc(out[:, -1, :])
+        out = self.fc(out)
         return out
 
 def prepare_dataframe_for_lstm(df, n_steps):
@@ -143,49 +146,35 @@ def validate_one_epoch(model, test_loader, loss_function):
     # print('***************************************************')
     # print()
 
-def train_model(batch_size, num_epochs, learning_rate, hidden_size, num_stacked_layers, train_dataset, test_dataset):
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
-    model = LSTM(1, hidden_size, num_stacked_layers)
-    model.to(device)
-
-    loss_function = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-
-    for epoch in range(num_epochs):
-        train_one_epoch(model, train_loader, optimizer, loss_function, epoch)
-        validate_one_epoch(model, test_loader, loss_function)
-
-    with torch.no_grad():
-        predicted = model(test_dataset.X.to(device)).to('cpu').numpy()
-
-    mape = mean_absolute_percentage_error(test_dataset.y, predicted)
-
-    return predicted, mape
-
-def train_model_kfold(k, model_params, traindata, batch_size = 16, num_epochs = 10):
+def train_model_kfold(k, model_params, traindata, testdata, batch_size=16, num_epochs=10):
     X, y = traindata.X, traindata.y
     kf = KFold(n_splits=k, shuffle=True, random_state=42)
 
     fold_mape_scores = []
+    fold_test_mape_scores = []
     best_mape = float('inf')
     best_model = None
 
     for fold, (train_idx, val_idx) in enumerate(kf.split(X)):
-        print(f"Fold {fold + 1}/{k}")
-        
+        print(f"\nFold {fold + 1}/{k}")
+
         X_train, X_val = X[train_idx], X[val_idx]
         y_train, y_val = y[train_idx], y[val_idx]
 
         train_dataset = TimeSeriesDataset(X_train, y_train)
         val_dataset = TimeSeriesDataset(X_val, y_val)
-        # test_dataset = TimeSeriesDataset(testdata)
 
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+        test_loader = DataLoader(testdata, batch_size=batch_size, shuffle=False)
 
-        model = LSTM(input_size=1, hidden_size=model_params.get("hidden_size"), num_stacked_layers=model_params.get("num_stacked_layers"))
+        model = LSTM(
+            input_size=1,
+            hidden_size=model_params.get("hidden_size"),
+            num_stacked_layers=model_params.get("num_stacked_layers"),
+            dropout_rate=model_params.get("dropout_rate")
+        )
         model.to(device)
 
         loss_function = nn.MSELoss()
@@ -195,38 +184,97 @@ def train_model_kfold(k, model_params, traindata, batch_size = 16, num_epochs = 
         for epoch in range(num_epochs):
             train_one_epoch(model, train_loader, optimizer, loss_function, epoch)
 
-        # Validate
+        # Validate on validation set
         with torch.no_grad():
-            predictions = []
-            ground_truths = []
+            val_predictions = []
+            val_ground_truths = []
             for X_batch, y_batch in val_loader:
                 X_batch, y_batch = X_batch.to(device), y_batch.to(device)
                 output = model(X_batch)
-                predictions.append(output.cpu().numpy())
-                ground_truths.append(y_batch.cpu().numpy())
+                val_predictions.append(output.cpu().numpy())
+                val_ground_truths.append(y_batch.cpu().numpy())
 
             # Flatten predictions and ground truths
-            predictions = np.concatenate(predictions)
-            ground_truths = np.concatenate(ground_truths)
+            val_predictions = np.concatenate(val_predictions)
+            val_ground_truths = np.concatenate(val_ground_truths)
 
-            # Calculate MAPE for the current fold
-            fold_mape = mean_absolute_percentage_error(ground_truths, predictions)
-            print(f"Fold {fold + 1} MAPE: {fold_mape}")
+            # Calculate MAPE for the current fold (validation set)
+            fold_mape = mean_absolute_percentage_error(val_ground_truths, val_predictions)
+            print(f"Fold {fold + 1} Validation MAPE: {fold_mape}")
             fold_mape_scores.append(fold_mape)
 
-            # predicted = best_model(test_dataset.X.to(device)).to('cpu').numpy()
-            # mape_best_model = mean_absolute_percentage_error(test_dataset.y, predicted)
+            # Validate on test set
+            test_predictions = []
+            test_ground_truths = []
+            for X_batch, y_batch in test_loader:
+                X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+                output = model(X_batch)
+                test_predictions.append(output.cpu().numpy())
+                test_ground_truths.append(y_batch.cpu().numpy())
 
-            # update best model if MAPE is lower
+            # Flatten predictions and ground truths for test set
+            test_predictions = np.concatenate(test_predictions)
+            test_ground_truths = np.concatenate(test_ground_truths)
+
+            # Calculate MAPE for the current fold (test set)
+            test_mape = mean_absolute_percentage_error(test_ground_truths, test_predictions)
+            print(f"Fold {fold + 1} Test MAPE: {test_mape}")
+            fold_test_mape_scores.append(test_mape)
+
+            # Update best model if Validation MAPE is lower
             if fold_mape < best_mape:
                 best_mape = fold_mape
                 best_model = dc(model)
 
     # Calculate the average MAPE across all folds
-    avg_mape = np.mean(fold_mape_scores)
-    print(f"Average MAPE across {k} folds: {avg_mape}")
+    avg_val_mape = np.mean(fold_mape_scores)
+    avg_test_mape = np.mean(fold_test_mape_scores)
+    print(f"Average Validation MAPE across {k} folds: {avg_val_mape}")
+    print(f"Average Test MAPE across {k} folds: {avg_test_mape}")
 
-    return best_model, avg_mape, fold_mape_scores
+    return best_model, avg_val_mape, avg_test_mape
+
+
+def parameter_tuning(parameter_names, parameters_values, train_data, testdata, k=5, num_epochs=8, batch_size=16):
+    mapes = []  # Store the MAPE results for each configuration
+
+    # Generate combinations of parameters to test
+    from itertools import product
+    all_param_combinations = list(product(*parameters_values))
+
+    for param_comb in all_param_combinations:
+        model_params = dict(zip(parameter_names, param_comb))
+
+        # Train the model with the current parameter combination
+        best_model, avg_mape, fold_mape_scores = train_model_kfold(k, model_params, train_data, testdata, batch_size, num_epochs)
+        
+        # Predict on the test data
+        with torch.no_grad():
+            predicted = best_model(testdata.X.to(device)).to('cpu').numpy()
+        
+        # Calculate the MAPE on the test set
+        mape = mean_absolute_percentage_error(testdata.y, predicted)
+        mapes.append((param_comb, mape))
+
+        # Print the results for this parameter combination
+        print(f'Parameter Combination: {param_comb}')
+        print(f'MAPE: {mape}')
+        print('***************************************************')
+
+    # Extract parameter combinations and corresponding MAPE values
+    param_combinations = [x[0] for x in mapes]
+    mape_values = [x[1] for x in mapes]
+
+    # Plot the MAPE values against the parameter combinations
+    for i, param_name in enumerate(parameter_names):
+        plt.figure(figsize=(10, 6))
+        param_values = [comb[i] for comb in param_combinations]
+        plt.plot(param_values, mape_values, marker='o')
+        plt.xlabel(param_name)
+        plt.ylabel('MAPE')
+        plt.title(f'MAPE vs {param_name}')
+        plt.show()
+
 
 def main(args):
     """ Main entry point of the app """
@@ -239,7 +287,7 @@ def main(args):
     # print(train_data) # 5 columns, 1629 rows
     # print(test_data) # 5 columns, 23 rows
 
-    lookback = 7
+    lookback = 3
     # # Adds lookback columns to the dataframe (the values of last close from the previous day up until "lookback" days backwards)
     shifted_training_df = prepare_dataframe_for_lstm(train_data, lookback)
     shifted_testing_df = prepare_dataframe_for_lstm(test_data, lookback)
@@ -279,39 +327,21 @@ def main(args):
     train_data = TimeSeriesDataset(X_train, y_train)
     test_data = TimeSeriesDataset(X_test, y_test)
 
-    # Stel je hebt de mapes-lijst zoals in jouw code
-    # mapes = []
-    # for i in range(20):
-    #     learning_rate = 0.001 + 0.01 * i
-    #     predicted, mape = train_model(
-    #         batch_size=16,
-    #         num_epochs=25,
-    #         learning_rate=learning_rate,
-    #         hidden_size=10,
-    #         num_stacked_layers=3,
-    #         train_dataset=train_data,
-    #         test_dataset=test_data)
-    #     mapes.append([learning_rate, mape])
-    #     print(f'Iteration {i+1} done')
-    #     print(f'Learing rate: {learning_rate}')
-    #     print(f'MAPE: {mape}')
-    #     print('***************************************************')
-    #
-    # # Extract de learning rates en MAPE-waarden
-    # learning_rates = [x[0] for x in mapes]
-    # mape_values = [x[1] for x in mapes]
-    #
-    # # Plot de MAPE-waarden tegen de learning rates
-    # plt.plot(learning_rates, mape_values, marker='o')
-    # plt.xlabel('Learning Rate')
-    # plt.ylabel('MAPE')
-    # plt.title('MAPE in functie van de Learning Rate')
-    # plt.show()
+    # parameter_names = ["hidden_size", "num_stacked_layers", "learning_rate", "dropout_rate"]
+    # parameters_values = [
+    #     [32, 64, 128, 256],         # hidden_size values
+    #     [1, 2, 3],              # num_stacked_layers values
+    #     [0.001, 0.005, 0.01],     # learning_rate values
+    #     [0, 0.1, 0.2]         # dropout_rate values
+    # ]
+
+    # parameter_tuning(parameter_names, parameters_values, train_data, test_data)
 
     model_params = {
-        "hidden_size": 10,
-        "num_stacked_layers": 3,
-        "learning_rate": 0.001
+        "hidden_size": 64,
+        "num_stacked_layers": 5,
+        "learning_rate": 0.0005,
+        "dropout_rate": 0.3
     }
 
     best_model, avg_mape, fold_mape_scores = train_model_kfold(
@@ -319,15 +349,19 @@ def main(args):
         model_params=model_params,
         traindata=train_data,
         batch_size=16,
-        num_epochs=10
+        num_epochs=10,
+        testdata=test_data
     )
+    
 
     with torch.no_grad():
         predicted = best_model(test_data.X.to(device)).to('cpu').numpy()
 
+
     mape_best_model = mean_absolute_percentage_error(test_data.y, predicted)
 
-    print(mape_best_model)
+
+    print(f'MAPE of the best model: {mape_best_model}')
 
     # plt.plot(test_data.y, label='actual close')
     # plt.plot(predicted, label='predicted close')
@@ -335,9 +369,6 @@ def main(args):
     # plt.ylabel('close')
     # plt.legend()
     # plt.show()
-
-
-
 
 
     # # plt.plot(np.l, label = 'Actual Last Close')
