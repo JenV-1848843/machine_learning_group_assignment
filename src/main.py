@@ -21,7 +21,7 @@ from sklearn.preprocessing import StandardScaler
 from copy import deepcopy as dc
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, TimeSeriesSplit
 
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
@@ -187,9 +187,12 @@ def validate_one_epoch(model, test_loader, loss_function):
     # print()
 
 
-def train_model_kfold(k, model_params, traindata, testdata, batch_size=16, num_epochs=100):
+def train_model_kfold(k, model_params, traindata, batch_size=16, num_epochs=100):
     X, y = traindata.X, traindata.y
-    kf = KFold(n_splits=k, shuffle=True, random_state=42)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Gebruik TimeSeriesSplit voor tijdreeksen
+    kf = TimeSeriesSplit(n_splits=k)
 
     fold_mape_scores = []
     fold_test_mape_scores = []
@@ -199,16 +202,18 @@ def train_model_kfold(k, model_params, traindata, testdata, batch_size=16, num_e
     for fold, (train_idx, val_idx) in enumerate(kf.split(X)):
         print(f"\nFold {fold + 1}/{k}")
 
+        # Train en validatie splits
         X_train, X_val = X[train_idx], X[val_idx]
         y_train, y_val = y[train_idx], y[val_idx]
 
+        # Datasets en DataLoaders
         train_dataset = TimeSeriesDataset(X_train, y_train)
         val_dataset = TimeSeriesDataset(X_val, y_val)
 
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-        test_loader = DataLoader(testdata, batch_size=batch_size, shuffle=False)
 
+        # Model initialisatie
         model = LSTM(
             input_size=1,
             hidden_size=model_params.get("hidden_size"),
@@ -219,28 +224,27 @@ def train_model_kfold(k, model_params, traindata, testdata, batch_size=16, num_e
 
         loss_function = MAPELoss()
         optimizer = torch.optim.Adam(model.parameters(), lr=model_params.get("learning_rate"))
-        # Initialize early stopping
-        early_stopping = EarlyStopping(patience=model_params.get("patience"), path="best_model.pth")
 
-        # Train and validate for each epoch
+        # Early Stopping initialisatie
+        model_path = f"models/best_model_fold_{fold}.pth"
+        early_stopping = EarlyStopping(patience=model_params.get("patience"), path=model_path)
+
+        # Train en validatie loop
         for epoch in range(num_epochs):
             train_one_epoch(model, train_loader, optimizer, loss_function, epoch)
-            
-            # Validation phase
-            val_loss = validate_one_epoch(model, test_loader, loss_function)
 
+            val_loss = validate_one_epoch(model, val_loader, loss_function)
             print(f"Epoch {epoch + 1}, Validation Loss: {val_loss:.4f}")
 
-            # Check for early stopping
             early_stopping(val_loss, model)
             if early_stopping.early_stop:
                 print("Early stopping triggered")
                 break
 
-        # Load the best model before returning
-        model.load_state_dict(torch.load("best_model.pth"))
+        # Laad het beste model voor deze fold
+        model.load_state_dict(torch.load(model_path))
 
-        # Validate on validation set
+        # Validatie op de validatieset
         with torch.no_grad():
             val_predictions = []
             val_ground_truths = []
@@ -250,48 +254,30 @@ def train_model_kfold(k, model_params, traindata, testdata, batch_size=16, num_e
                 val_predictions.append(output.cpu().numpy())
                 val_ground_truths.append(y_batch.cpu().numpy())
 
-            # Flatten predictions and ground truths
             val_predictions = np.concatenate(val_predictions)
             val_ground_truths = np.concatenate(val_ground_truths)
 
-            # Calculate MAPE for the current fold (validation set)
             fold_mape = mean_absolute_percentage_error(val_ground_truths, val_predictions)
-            print(f"Fold {fold + 1} Validation MAPE: {fold_mape}")
+            print(f"Fold {fold + 1} Validation MAPE: {fold_mape:.4f}")
             fold_mape_scores.append(fold_mape)
 
-            # Validate on test set
-            test_predictions = []
-            test_ground_truths = []
-            for X_batch, y_batch in test_loader:
-                X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-                output = model(X_batch)
-                test_predictions.append(output.cpu().numpy())
-                test_ground_truths.append(y_batch.cpu().numpy())
+        # Update het beste model
+        if fold_mape < best_mape:
+            best_mape = fold_mape
+            best_model = dc(model)
 
-            # Flatten predictions and ground truths for test set
-            test_predictions = np.concatenate(test_predictions)
-            test_ground_truths = np.concatenate(test_ground_truths)
-
-            # Calculate MAPE for the current fold (test set)
-            test_mape = mean_absolute_percentage_error(test_ground_truths, test_predictions)
-            print(f"Fold {fold + 1} Test MAPE: {test_mape}")
-            fold_test_mape_scores.append(test_mape)
-
-            # Update best model if Validation MAPE is lower
-            if fold_mape < best_mape:
-                best_mape = fold_mape
-                best_model = dc(model)
-
-    # Calculate the average MAPE across all folds
+    # Gemiddelde scores berekenen
     avg_val_mape = np.mean(fold_mape_scores)
-    avg_test_mape = np.mean(fold_test_mape_scores)
-    print(f"Average Validation MAPE across {k} folds: {avg_val_mape}")
-    print(f"Average Test MAPE across {k} folds: {avg_test_mape}")
+    # avg_test_mape = np.mean(fold_test_mape_scores)
 
-    return best_model, avg_val_mape, avg_test_mape
+    print(f"\nAverage Validation MAPE across {k} folds: {avg_val_mape:.4f}")
+    # print(f"Average Test MAPE across {k} folds: {avg_test_mape:.4f}")
+
+    return best_model
 
 
-def parameter_tuning(parameter_names, parameters_values, train_data, testdata, k=10, num_epochs=30, batch_size=16):
+
+def parameter_tuning(parameter_names, parameters_values, train_data, testdata, k=5, num_epochs=50, batch_size=16):
     mapes = []  # Store the MAPE results for each configuration
 
     # Generate combinations of parameters to test
@@ -305,7 +291,7 @@ def parameter_tuning(parameter_names, parameters_values, train_data, testdata, k
         model_params = dict(zip(parameter_names, param_comb))
 
         # Train the model with the current parameter combination
-        best_model, avg_mape, fold_mape_scores = train_model_kfold(k, model_params, train_data, testdata, batch_size, num_epochs)
+        best_model = train_model_kfold(k, model_params, train_data, batch_size, num_epochs)
         
         # Predict on the test data
         with torch.no_grad():
@@ -317,7 +303,7 @@ def parameter_tuning(parameter_names, parameters_values, train_data, testdata, k
 
         # Print the results for this parameter combination
         print(f'Parameter Combination: {param_comb}')
-        print(f'MAPE: {mape}')
+        print(f'MAPE on test dataset: {mape}')
         print('***************************************************')
 
         # Update the best combination if the current MAPE is lower
@@ -396,44 +382,50 @@ def main(args):
     test_data = TimeSeriesDataset(X_test, y_test)
 
     # vvvvvvvvvvvvv PARAMETER TUNING vvvvvvvvvvvvv
-    parameter_names = ["hidden_size", "num_stacked_layers", "learning_rate", "dropout_rate", "patience"]
-    parameters_values = [
-        [200, 250, 300, 350],         # hidden_size values
-        [3, 5, 10],              # num_stacked_layers values
-        [0.001, 0.005, 0.01],     # learning_rate values
-        [0, 0.1],         # dropout_rate values
-        [1, 3, 5]              # patience
-    ]
+    # parameter_names = ["hidden_size", "num_stacked_layers", "learning_rate", "dropout_rate", "patience"]
+    # parameters_values = [
+    #     [110, 120, 130],         # hidden_size values
+    #     [2, 3, 4],              # num_stacked_layers values
+    #     [0.00005, 0.0001],     # learning_rate values
+    #     [0.1],         # dropout_rate values
+    #     [3, 4, 5]              # patience
+    # ]
 
-    parameter_tuning(parameter_names, parameters_values, train_data, test_data)
+    # parameter_tuning(parameter_names, parameters_values, train_data, test_data)
 
     # ======== END OF PARAMETER TUNING =========
 
     # vvvvvvvvvvvvv ONE MODEL TRAINING vvvvvvvvvvvvv
 
-    # model_params = {
-    #     "hidden_size": 64,
-    #     "num_stacked_layers": 5,
-    #     "learning_rate": 0.0005,
-    #     "dropout_rate": 0.3,
-    #     "patience": 5
-    # }
+    # Best model parameters:
+    # hidden_size = 110
+    # num_stacked_layers = 4
+    # learning_rate = 0.0001
+    # dropout_rate = 0.1
+    # patience = 4
 
-    # best_model, avg_mape, fold_mape_scores = train_model_kfold(
-    #     k=5,
-    #     model_params=model_params,
-    #     traindata=train_data,
-    #     batch_size=16,
-    #     num_epochs=50,
-    #     testdata=test_data
-    # )
+    model_params = {
+        "hidden_size": 110,
+        "num_stacked_layers": 4,
+        "learning_rate": 0.0001,
+        "dropout_rate": 0.1,
+        "patience": 4
+    }
+
+    best_model = train_model_kfold(
+        k=5,
+        model_params=model_params,
+        traindata=train_data,
+        batch_size=16,
+        num_epochs=50,
+    )
     
 
-    # with torch.no_grad():
-    #     predicted = best_model(test_data.X.to(device)).to('cpu').numpy()
+    with torch.no_grad():
+        predicted = best_model(test_data.X.to(device)).to('cpu').numpy()
 
-    # mape_best_model = mean_absolute_percentage_error(test_data.y, predicted)
-    # print(f'MAPE of the best model: {mape_best_model}')
+    mape_best_model = mean_absolute_percentage_error(test_data.y, predicted)
+    print(f'MAPE of the best model: {mape_best_model}')
 
     # ======== END OF ONE MODEL TRAINING =========
 
