@@ -399,43 +399,50 @@ def main(args):
     test_data = TimeSeriesDataset(X_test, y_test)
 
     # vvvvvvvvvvvvv PARAMETER TUNING vvvvvvvvvvvvv
-    parameter_names = ["hidden_size", "num_stacked_layers", "learning_rate", "dropout_rate", "patience"]
-    parameters_values = [
-        [5, 16, 32, 64, 128],         # hidden_size values
-        [3],              # num_stacked_layers values
-        [0.001],     # learning_rate values
-        [0],         # dropout_rate values
-        [5]              # patience
-    ]
+    # parameter_names = ["hidden_size", "num_stacked_layers", "learning_rate", "dropout_rate", "patience"]
+    # parameters_values = [
+    #     [110, 120, 130],         # hidden_size values
+    #     [2, 3, 4],              # num_stacked_layers values
+    #     [0.00005, 0.0001],     # learning_rate values
+    #     [0.1],         # dropout_rate values
+    #     [3, 4, 5]              # patience
+    # ]
 
-    parameter_tuning(parameter_names, parameters_values, train_data, test_data)
+    # parameter_tuning(parameter_names, parameters_values, train_data, test_data)
 
     # ======== END OF PARAMETER TUNING =========
 
     # vvvvvvvvvvvvv ONE MODEL TRAINING vvvvvvvvvvvvv
 
-    # model_params = {
-    #     "hidden_size": 256,
-    #     "num_stacked_layers": 3,
-    #     "learning_rate": 0.0005,
-    #     "dropout_rate": 0.1,
-    #     "patience": 3
-    # }
+    # Best model parameters:
+    # hidden_size = 110
+    # num_stacked_layers = 4
+    # learning_rate = 0.0001
+    # dropout_rate = 0.1
+    # patience = 4
 
-    # best_model = train_model_kfold(
-    #     k=5,
-    #     model_params=model_params,
-    #     traindata=train_data,
-    #     batch_size=16,
-    #     num_epochs=50,
-    # )
+    model_params = {
+        "hidden_size": 110,
+        "num_stacked_layers": 4,
+        "learning_rate": 0.0001,
+        "dropout_rate": 0.1,
+        "patience": 4
+    }
+
+    best_model = train_model_kfold(
+        k=5,
+        model_params=model_params,
+        traindata=train_data,
+        batch_size=16,
+        num_epochs=50,
+    )
     
 
-    # with torch.no_grad():
-    #     predicted = best_model(test_data.X.to(device)).to('cpu').numpy()
+    with torch.no_grad():
+        predicted = best_model(test_data.X.to(device)).to('cpu').numpy()
 
-    # mape_best_model = mean_absolute_percentage_error(test_data.y, predicted)
-    # print(f'MAPE of the best model: {mape_best_model}')
+    mape_best_model = mean_absolute_percentage_error(test_data.y, predicted)
+    print(f'MAPE of the best model: {mape_best_model}')
 
     # ======== END OF ONE MODEL TRAINING =========
 
