@@ -261,23 +261,6 @@ def train_model_kfold(k, model_params, traindata, batch_size=16, num_epochs=100)
             print(f"Fold {fold + 1} Validation MAPE: {fold_mape:.4f}")
             fold_mape_scores.append(fold_mape)
 
-        # # Test op de testset
-        # with torch.no_grad():
-        #     test_predictions = []
-        #     test_ground_truths = []
-        #     for X_batch, y_batch in test_loader:
-        #         X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-        #         output = model(X_batch)
-        #         test_predictions.append(output.cpu().numpy())
-        #         test_ground_truths.append(y_batch.cpu().numpy())
-
-        #     test_predictions = np.concatenate(test_predictions)
-        #     test_ground_truths = np.concatenate(test_ground_truths)
-
-        #     test_mape = mean_absolute_percentage_error(test_ground_truths, test_predictions)
-        #     print(f"Fold {fold + 1} Test MAPE: {test_mape:.4f}")
-        #     fold_test_mape_scores.append(test_mape)
-
         # Update het beste model
         if fold_mape < best_mape:
             best_mape = fold_mape
