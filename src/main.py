@@ -373,7 +373,7 @@ def run_one_model(train_data, test_data, model_params, num_epochs=50, batch_size
     print("MAPE of model: ", mape_best_model)
 
     if not multiple_models:
-        plot_predictions(test_data.y, predicted)
+        plot_predictions(test_data.y, predicted, title=f'Model Predictions (MAPE: {mape_best_model:.4f})')
 
     return mape_best_model, predicted
 
@@ -506,7 +506,7 @@ def main(args):
 
     # vvvvvvvvvvvvv ONE MODEL TRAINING vvvvvvvvvvvvv
 
-    # Best model parameters:
+    # # Best model parameters:
     # hidden_size = 110
     # num_stacked_layers = 4
     # learning_rate = 0.0001
@@ -527,23 +527,23 @@ def main(args):
 
     # vvvvvvvvvvvvv MULTIPLE MODELS TRAINING vvvvvvvvvvvvv
 
-    # Best model parameters:
+    # # Best model parameters:
     # hidden_size = 110
     # num_stacked_layers = 4
     # learning_rate = 0.0001
     # dropout_rate = 0.1
     # patience = 4
     
-    n = 5
-    model_params = {
-        "hidden_size": 110,
-        "num_stacked_layers": 4,
-        "learning_rate": 0.0001,
-        "dropout_rate": 0.1,
-        "patience": 4
-    }
+    # n = 5
+    # model_params = {
+    #     "hidden_size": 110,
+    #     "num_stacked_layers": 4,
+    #     "learning_rate": 0.0001,
+    #     "dropout_rate": 0.1,
+    #     "patience": 4
+    # }
 
-    mapes, predictions = run_multiple_models(train_data, test_data, model_params, n)
+    # mapes, predictions = run_multiple_models(train_data, test_data, model_params, n)
 
     # ======== END OF MULTIPLE MODELS TRAINING =========
 
