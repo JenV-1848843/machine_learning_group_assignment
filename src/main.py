@@ -68,7 +68,9 @@ class EarlyStopping:
         if val_loss < self.best_loss - self.delta:
             self.best_loss = val_loss
             self.counter = 0
-            torch.save(model.state_dict(), self.path)  # Save the best model
+            with open(self.path, 'wb') as f:
+                torch.save(model.state_dict(), f)  # Save the best model
+
         else:
             self.counter += 1
             if self.counter >= self.patience:
@@ -97,16 +99,45 @@ class LSTM(nn.Module):
         out = self.fc(out)
         return out
 
+def calculate_macd(df, short_window=12, long_window=26, signal_window=9):
+    df['ShortEMA'] = df['Last Close'].ewm(span=short_window, adjust=False).mean()
+    df['LongEMA'] = df['Last Close'].ewm(span=long_window, adjust=False).mean()
+    df['MACD'] = df['ShortEMA'] - df['LongEMA']
+    df['MACD_Signal'] = df['MACD'].ewm(span=signal_window, adjust=False).mean()
+
+def calculate_moving_average(df, window=20):
+    df[f'MA_{window}'] = df['Last Close'].rolling(window=window).mean()
+
+def calculate_bollinger_bands(df, window=20, num_std_dev=2):
+    rolling_mean = df['Last Close'].rolling(window=window).mean()
+    rolling_std = df['Last Close'].rolling(window=window).std()
+    df['BB_Upper'] = rolling_mean + (rolling_std * num_std_dev)
+    df['BB_Lower'] = rolling_mean - (rolling_std * num_std_dev)
+
+def calculate_rsi(df, window=14):
+    delta = df['Last Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+    rs = gain / loss
+    df['RSI'] = 100 - (100 / (1 + rs))
+
 def prepare_dataframe_for_lstm(df, n_steps):
     df = dc(df)
 
     df.set_index('Date', inplace=True)
 
-    for i in range(1, n_steps+1):
+    # Calculate technical indicators
+    # calculate_macd(df)
+    # calculate_moving_average(df, window=20)
+    # calculate_bollinger_bands(df, window=20)
+    # calculate_rsi(df, window=14)
+
+    for i in range(1, n_steps + 1):
         df[f'Last Close(t-{i})'] = df['Last Close'].shift(i)
 
-    df.drop(columns=['Open'], inplace=True)  
+    df.drop(columns=['Open'], inplace=True)
 
+    # Drop rows with NaN values due to feature calculations or lagging
     df.dropna(inplace=True)
 
     return df
@@ -195,7 +226,6 @@ def train_model_kfold(k, model_params, traindata, batch_size=16, num_epochs=100)
     kf = TimeSeriesSplit(n_splits=k)
 
     fold_mape_scores = []
-    fold_test_mape_scores = []
     best_mape = float('inf')
     best_model = None
 
@@ -226,7 +256,7 @@ def train_model_kfold(k, model_params, traindata, batch_size=16, num_epochs=100)
         optimizer = torch.optim.Adam(model.parameters(), lr=model_params.get("learning_rate"))
 
         # Early Stopping initialisatie
-        model_path = f"models/best_model_fold_{fold}.pth"
+        model_path = f"fold_{fold + 1}.pth"
         early_stopping = EarlyStopping(patience=model_params.get("patience"), path=model_path)
 
         # Train en validatie loop
@@ -274,8 +304,6 @@ def train_model_kfold(k, model_params, traindata, batch_size=16, num_epochs=100)
     # print(f"Average Test MAPE across {k} folds: {avg_test_mape:.4f}")
 
     return best_model
-
-
 
 def parameter_tuning(parameter_names, parameters_values, train_data, testdata, k=5, num_epochs=50, batch_size=16):
     mapes = []  # Store the MAPE results for each configuration
@@ -328,6 +356,87 @@ def parameter_tuning(parameter_names, parameters_values, train_data, testdata, k
         plt.title(f'MAPE vs {param_name}')
         plt.show()
 
+
+def run_one_model(train_data, test_data, model_params, num_epochs=50, batch_size=16, multiple_models=False):
+    best_model = train_model_kfold(
+        k=5,
+        model_params=model_params,
+        traindata=train_data,
+        batch_size=batch_size,
+        num_epochs=num_epochs,
+    )
+
+    with torch.no_grad():
+        predicted = best_model(test_data.X.to(device)).to('cpu').numpy()
+
+    mape_best_model = mean_absolute_percentage_error(test_data.y, predicted)
+    print("MAPE of model: ", mape_best_model)
+
+    if not multiple_models:
+        plot_predictions(test_data.y, predicted, title=f'Model Predictions (MAPE: {mape_best_model:.4f})')
+
+    return mape_best_model, predicted
+
+def run_multiple_models(train_data, test_data, model_params, n, num_epochs=50, batch_size=16):
+    mapes = {}
+    predictions = {}
+
+
+    for i in range(n):
+        print(f"============ Model {i+1}/{n} ============")
+        mape, predicted = run_one_model(train_data, test_data, model_params, num_epochs, batch_size, multiple_models=True)
+        mapes[f"Model {i+1}"] = mape
+        predictions[f"Model {i+1}"] = predicted
+
+    average = 0
+    best_mape = float('inf')
+    worst_mape = float('-inf')
+    best_model = None
+    worst_model = None
+
+    for model, mape in mapes.items():
+        average += mape
+        if mape < best_mape:
+            best_mape = mape
+            best_model = model
+        if mape > worst_mape:
+            worst_mape = mape
+            worst_model = model
+
+    average /= n
+
+    print(f'Average MAPE: {average:.4f}')
+    print(f'Best MAPE: {best_mape:.4f}')
+    print(f'Worst MAPE: {worst_mape:.4f}')
+
+    plot_average_predictions(list(mapes.keys()), list(mapes.values()), average)
+    plot_predictions(test_data.y, predictions[best_model], title=f'Best Model Predictions: {best_model} (MAPE: {best_mape:.4f})')
+    plot_predictions(test_data.y, predictions[worst_model], title=f'Worst Model Predictions: {worst_model} (MAPE: {worst_mape:.4f})')
+
+    return mapes, predictions
+
+
+def plot_predictions(y_true, y_pred, title='Predictions'):
+    plt.figure(figsize=(10, 6))
+    plt.plot(y_true, label='Actual Last Close')
+    plt.plot(y_pred, label='Predicted Last Close')
+    plt.xlabel('Day')
+    plt.ylabel('Close Price')
+    plt.title(title)
+    plt.legend()
+    plt.show()
+
+
+def plot_average_predictions(x_models, y_MAPE, average_MAPE):
+    plt.figure(figsize=(10, 6))
+    plt.plot(y_MAPE, marker='o')
+    plt.axhline(y=average_MAPE, color='r', linestyle='--', label='Average MAPE')
+    plt.xticks(ticks=range(len(x_models)), labels=x_models, rotation='vertical', fontsize=6)
+    plt.xlabel('Model')
+    plt.ylabel('MAPE')
+    plt.title('MAPE vs Model')
+    plt.legend()
+    plt.show()
 
 def main(args):
     """ Main entry point of the app """
@@ -397,66 +506,46 @@ def main(args):
 
     # vvvvvvvvvvvvv ONE MODEL TRAINING vvvvvvvvvvvvv
 
-    # Best model parameters:
+    # # Best model parameters:
     # hidden_size = 110
     # num_stacked_layers = 4
     # learning_rate = 0.0001
     # dropout_rate = 0.1
     # patience = 4
 
-    model_params = {
-        "hidden_size": 110,
-        "num_stacked_layers": 4,
-        "learning_rate": 0.0001,
-        "dropout_rate": 0.1,
-        "patience": 4
-    }
+    # model_params = {
+    #     "hidden_size": 110,
+    #     "num_stacked_layers": 4,
+    #     "learning_rate": 0.0001,
+    #     "dropout_rate": 0.1,
+    #     "patience": 4
+    # }
 
-    best_model = train_model_kfold(
-        k=5,
-        model_params=model_params,
-        traindata=train_data,
-        batch_size=16,
-        num_epochs=50,
-    )
-    
-
-    with torch.no_grad():
-        predicted = best_model(test_data.X.to(device)).to('cpu').numpy()
-
-    mape_best_model = mean_absolute_percentage_error(test_data.y, predicted)
-    print(f'MAPE of the best model: {mape_best_model}')
+    # mape_best_model, predictions = run_one_model(train_data, test_data, model_params)
 
     # ======== END OF ONE MODEL TRAINING =========
 
+    # vvvvvvvvvvvvv MULTIPLE MODELS TRAINING vvvvvvvvvvvvv
 
-    # plt.plot(test_data.y, label='actual close')
-    # plt.plot(predicted, label='predicted close')
-    # plt.xlabel('Day')
-    # plt.ylabel('close')
-    # plt.legend()
-    # plt.show()
+    # # Best model parameters:
+    # hidden_size = 110
+    # num_stacked_layers = 4
+    # learning_rate = 0.0001
+    # dropout_rate = 0.1
+    # patience = 4
+    
+    # n = 5
+    # model_params = {
+    #     "hidden_size": 110,
+    #     "num_stacked_layers": 4,
+    #     "learning_rate": 0.0001,
+    #     "dropout_rate": 0.1,
+    #     "patience": 4
+    # }
 
+    # mapes, predictions = run_multiple_models(train_data, test_data, model_params, n)
 
-    # # plt.plot(np.l, label = 'Actual Last Close')
-    # # plt.plot(predicted, label = 'Predicted Last Close')
-    # # plt.xlabel('Day')
-    # # plt.ylabel('Close')
-    # # plt.legend()
-    # # plt.show()
-    #
-    # # plt.plot(train_data['Date'], train_data['Last Close'])
-    # # plt.show()
-    # # train_values = train_data['Last Close'].values.reshape(-1, 1)
-    # # test_values = test_data['Last Close'].values.reshape(-1, 1)
-    #
-    # # plot_data(train_data)
-    #
-    # # train_values = normalize(train_values)
-    #
-    # # seq_length = 2
-    # # x, y = create_sequences(train_values, seq_length)
-
+    # ======== END OF MULTIPLE MODELS TRAINING =========
 
 
 if __name__ == "__main__":
